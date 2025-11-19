@@ -8,8 +8,7 @@ use crate::{
 use axum::Json;
 use reqwest::Client;
 use serde_json::json;
-use std::collections::HashSet;
-
+ 
 pub async fn create_jira_subtasks(
     config: &AppConfig,
     payload: Vec<IncomingFields>,
@@ -17,7 +16,7 @@ pub async fn create_jira_subtasks(
     let client = Client::new();
     let payload = convert_to_jira_payload(payload);
     let url = format!("{}/rest/api/2/issue/bulk", config.base_url);
-
+ 
     let res: serde_json::Value = client
         .post(url)
         .basic_auth(&config.email, Some(&config.api_token))
@@ -26,12 +25,38 @@ pub async fn create_jira_subtasks(
         .await?
         .json::<serde_json::Value>()
         .await?;
-
+ 
+    println!("Jira Response: {:#?}", res);
+ 
+ 
+    let mut created_tasks: Vec<serde_json::Value> = Vec::new();
+    let mut error_messages: Vec<String> = Vec::new();
+ 
+    if let Some(issues) = res.get("issues").and_then(|v| v.as_array()) {
+        for issue in issues {
+            let id = issue.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            let key = issue
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let link = issue
+                .get("self")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+ 
+            created_tasks.push(json!({
+                "id": id,
+                "key": key,
+                "link": link
+            }));
+        }
+    }
+ 
     if let Some(arr) = res.get("errors").and_then(|v| v.as_array()) {
         let is_unauthorized = arr
             .iter()
             .any(|item| item.get("status").and_then(|v| v.as_i64()) == Some(401));
-
+ 
         if is_unauthorized {
             if let Some(first) = arr.first() {
                 if let Some(msg) = first
@@ -41,56 +66,72 @@ pub async fn create_jira_subtasks(
                     .and_then(|a| a.first())
                     .and_then(|v| v.as_str())
                 {
-                    let output = vec![msg.to_string()];
-                    return Err(AppError(anyhow::anyhow!(
-                        serde_json::to_string(&output).unwrap()
-                    )));
+                    error_messages.push(msg.to_string());
                 }
             }
-
-            return Err(AppError(anyhow::anyhow!("[\"Unauthorized error\"]")));
         }
-
+ 
         let has_parent_error = arr.iter().any(|item| {
             item.get("elementErrors")
                 .and_then(|e| e.get("errors"))
                 .and_then(|err| err.get("parent"))
                 .is_some()
         });
-
+ 
         if has_parent_error {
             let failed_indexes: Vec<usize> = arr
                 .iter()
                 .filter_map(|item| item.get("failedElementNumber")?.as_u64())
                 .map(|v| v as usize)
                 .collect();
-
-
-            let mut unique_set: HashSet<String> = HashSet::new();
-
+ 
+            let mut set = std::collections::HashSet::new();
+ 
             for idx in failed_indexes {
-                if let Some(issue) = payload.issueUpdates.get(idx) {
-                    unique_set.insert(issue.fields.parent.key.clone());
+                if let Some(issue) = payload.issue_updates.get(idx) {
+                    set.insert(issue.fields.parent.key.clone());
                 }
             }
-
-            let formatted_errors: Vec<String> = unique_set
-                .into_iter()
-                .map(|key| format!("Subtasks for story {} were not created", key))
-                .collect();
-            return Err(AppError(anyhow::anyhow!(
-                serde_json::to_string(&formatted_errors).unwrap()
-            )));
+ 
+            let mut unique: Vec<String> = set.into_iter().collect();
+            unique.sort();
+ 
+            for key in unique {
+                error_messages.push(format!("Subtasks for story {} were not created", key));
+            }
         }
     }
-
-    Ok(Json(json!({ "status": "ok", "jira_response": res })))
+ 
+    if !created_tasks.is_empty() && error_messages.is_empty() {
+        return Ok(Json(json!({
+            "created_tasks": created_tasks,
+            "error_messages": null,
+            "status": "ok"
+        })));
+    }
+ 
+    if created_tasks.is_empty() && !error_messages.is_empty() {
+        let error_json = json!({
+            "created_tasks": serde_json::Value::Null,
+            "error_messages": error_messages,
+            "status": "error"
+        });
+ 
+        return Err(AppError(anyhow::anyhow!(error_json)));
+    }
+ 
+    let partial_tasks = json!({
+        "created_tasks": created_tasks,
+        "error_messages": error_messages,
+        "status": "error"
+    });
+    return Err(AppError(anyhow::anyhow!(partial_tasks)));
 }
-
+ 
 pub fn convert_to_jira_payload(items: Vec<IncomingFields>) -> JiraPayload {
     let project_key = std::env::var("JIRA_PROJECT_KEY").unwrap();
     let issue_type_id = std::env::var("JIRA_ISSUE_TYPE_ID").unwrap();
-
+ 
     let mut updates: Vec<JiraIssueUpdate> = items
         .into_iter()
         .map(|item| JiraIssueUpdate {
@@ -110,6 +151,7 @@ pub fn convert_to_jira_payload(items: Vec<IncomingFields>) -> JiraPayload {
         .collect();
     updates.sort_by(|a, b| a.fields.parent.key.cmp(&b.fields.parent.key));
     JiraPayload {
-        issueUpdates: updates,
+        issue_updates: updates,
     }
 }
+ 

@@ -11,33 +11,6 @@ pub struct IncomingFields {
     pub summary: String,
 }
 
-// #[derive(Debug, Deserialize, Serialize)]
-// pub struct IssuePayload {
-//     pub key: IssueUpdates,
-// }
-
-// #[derive(Debug, Deserialize, Serialize)]
-// pub struct IssueUpdates{
-//     pub fields: Fields,
-// }
-
-// #[derive(Debug, Deserialize, Serialize)]
-// pub struct Fields{
-//     pub parent: IncomingParentPayload,
-//     pub project: IncomingProject,
-//     pub summary: String,
-//     pub issuetype: IncomingIssueType,
-// }
-
-// #[derive(Debug, Deserialize, Serialize)]
-// pub struct IncomingProject {
-//     pub key: String,
-// }
-
-// #[derive(Debug, Deserialize, Serialize)]
-// pub struct IncomingIssueType {
-//     pub name: String,
-// }
 #[derive(Debug, Serialize)]
 pub struct JiraProject {
     pub key: String,
@@ -63,6 +36,7 @@ pub struct JiraIssueUpdate {
 
 #[derive(Debug, Serialize)]
 pub struct JiraPayload {
-    pub issueUpdates: Vec<JiraIssueUpdate>,
+    #[serde(rename = "issueUpdates")]
+    pub issue_updates: Vec<JiraIssueUpdate>,
 }
 
