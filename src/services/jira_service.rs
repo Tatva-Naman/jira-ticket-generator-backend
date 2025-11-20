@@ -34,15 +34,19 @@ pub async fn create_jira_subtasks(
  
     if let Some(issues) = res.get("issues").and_then(|v| v.as_array()) {
         for issue in issues {
+            
             let id = issue.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+
             let key = issue
                 .get("key")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            let link = issue
-                .get("self")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
+
+            let link = format!(
+                "{}/browse/{}",
+                config.base_url.trim_end_matches('/'),
+                key
+            );
  
             created_tasks.push(json!({
                 "id": id,
