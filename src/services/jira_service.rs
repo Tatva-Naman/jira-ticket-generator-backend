@@ -1,13 +1,15 @@
 use crate::{
     config::AppConfig,
     dtos::issue_payload::{
-        IncomingFields, JiraFields, JiraIssueType, JiraIssueUpdate, JiraPayload, JiraProject,
+        IncomingFields, JiraFields, JiraIssueType, JiraIssueUpdate, JiraPayload, JiraProject, TaskInput,
     },
     error::AppError,
 };
+use anyhow::Context;
 use axum::Json;
-use reqwest::Client;
-use serde_json::json;
+use reqwest::{Client, StatusCode};
+use serde_json::{json, Value};
+use urlencoding::encode;
  
 pub async fn create_jira_subtasks(
     config: &AppConfig,
@@ -26,28 +28,21 @@ pub async fn create_jira_subtasks(
         .json::<serde_json::Value>()
         .await?;
  
-    println!("Jira Response: {:#?}", res);
- 
- 
     let mut created_tasks: Vec<serde_json::Value> = Vec::new();
     let mut error_messages: Vec<String> = Vec::new();
  
     if let Some(issues) = res.get("issues").and_then(|v| v.as_array()) {
         for issue in issues {
-            
             let id = issue.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-
             let key = issue
                 .get("key")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-
             let link = format!(
                 "{}/browse/{}",
-                config.base_url.trim_end_matches('/'),
+                config.base_url,
                 key
             );
- 
             created_tasks.push(json!({
                 "id": id,
                 "key": key,
@@ -157,5 +152,184 @@ pub fn convert_to_jira_payload(items: Vec<IncomingFields>) -> JiraPayload {
     JiraPayload {
         issue_updates: updates,
     }
+}
+ 
+// pub async fn search_jira_tasks(
+//     config: &AppConfig,
+//     payload: SearchJiraTasks,
+// ) -> Result<Json<Value>, AppError> {
+   
+//     if payload.tasks.is_empty() {
+//         return Err(anyhow::anyhow!("The list of tasks (tasks) to search for cannot be empty.").into());
+//     }
+ 
+//     let quoted_keys = payload
+//         .tasks
+//         .iter()
+//         .map(|key| format!("\"{}\"", key))
+//         .collect::<Vec<String>>()
+//         .join(", ");
+ 
+//     let jql_query = format!("parent IN ({})", quoted_keys);
+   
+//     let encoded_jql = encode(&jql_query);
+ 
+//     let url = format!(
+//         "{}/rest/api/3/search/jql?jql={}&fields=summary",
+//         config.base_url,
+//         encoded_jql
+//     );
+ 
+//     let client = Client::new();
+   
+//     let response = client
+//         .get(&url)
+//         .basic_auth(&config.email, Some(&config.api_token))
+//         .send()
+//         .await
+//         .context("Failed to send request to Jira API")?;
+ 
+//     let status = response.status();
+//     if status != StatusCode::OK {
+//         let body = response.text().await.unwrap_or_else(|_| "No detailed error body available".to_string());
+//         return Err(anyhow::anyhow!("{}", body).into());
+//     }
+ 
+//     let result: Value = response
+//         .json()
+//         .await
+//         .context("Failed to parse Jira API response JSON into serde_json::Value")?; // Convert serde error to AppError
+ 
+//     Ok(Json(result))
+// }
+ 
+pub async fn search_jira_tasks(
+    config: &AppConfig,
+    payload: Vec<TaskInput>,
+) -> Result<Json<Value>, AppError>
+{
+    if payload.is_empty() {
+        return Err(anyhow::anyhow!("No tasks provided.").into());
+    }
+ 
+    // Extract only subtask keys
+    let parent_keys: Vec<String> = payload
+        .iter()
+        .map(|t| t.subtask.clone())
+        .collect();
+ 
+    let quoted_keys = parent_keys
+        .iter()
+        .map(|k| format!("\"{}\"", k))
+        .collect::<Vec<_>>()
+        .join(", ");
+ 
+    let jql_query = format!("parent IN ({})", quoted_keys);
+    let encoded_jql = encode(&jql_query);
+    let url = format!(
+        "{}/rest/api/3/search/jql?jql={}&fields=summary",
+        config.base_url,
+        encoded_jql
+    );
+    let client = Client::new();
+ 
+    let response = client
+        .get(&url)
+        .basic_auth(&config.email, Some(&config.api_token))
+        .send()
+        .await
+        .context("Jira API request failed")?;
+    if response.status() != StatusCode::OK {
+        let err = response.text().await.unwrap_or("Unknown error".to_string());
+        return Err(anyhow::anyhow!(err).into());
+    }
+ 
+    let jira_json: Value = response
+        .json()
+        .await
+        .context("Jira JSON parsing failed")?;
+ 
+    let actual_summaries = extract_jira_summaries(&jira_json);
+    // Final aggregate output
+    let mut flat_output = Vec::<Value>::new();
+ 
+    for item in payload {
+        let expected = generate_expected_summaries(&item.subtask, &item.r#type);
+   
+        let comparison = compare_summaries(expected, actual_summaries.clone());
+   
+        for entry in comparison {
+            flat_output.push(entry);
+        }
+    }
+   
+    Ok(Json(json!(flat_output)))    
+}
+ 
+fn generate_expected_summaries(parent: &str, task_type: &str) -> Vec<String> {
+    let fe_tasks = vec![
+        "Review Requirements",
+        "Development",
+        "Unit Testing",
+    ];
+ 
+    let be_tasks = vec![
+        "Review Requirements",
+        "Development",
+        "Unit Testing",
+    ];
+ 
+    match task_type {
+        "FE" => fe_tasks
+            .into_iter()
+            .map(|t| format!("({}) FE - {}", parent, t))
+            .collect(),
+ 
+        "BE" => be_tasks
+            .into_iter()
+            .map(|t| format!("({}) BE - {}", parent, t))
+            .collect(),
+ 
+        "Both" => {
+            let mut combined = Vec::new();
+ 
+            combined.extend(
+                fe_tasks.iter().map(|t| format!("({}) FE - {}", parent, t))
+            );
+ 
+            combined.extend(
+                be_tasks.iter().map(|t| format!("({}) BE - {}", parent, t))
+            );
+ 
+            combined
+        }
+ 
+        _ => vec![],
+    }
+}
+ 
+fn extract_jira_summaries(jira_json: &Value) -> Vec<String> {
+    jira_json["issues"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .filter_map(|issue| {
+            issue["fields"]["summary"].as_str().map(|s| s.to_string())
+        })
+        .collect()
+}
+ 
+fn compare_summaries(expected: Vec<String>, actual: Vec<String>) -> Vec<Value> {
+    expected
+        .into_iter()
+        .map(|exp| {
+            let exists = actual.contains(&exp);
+ 
+            json!({
+                "summary": exp,
+                "exist": exists
+            })
+        })
+        .collect()
 }
  

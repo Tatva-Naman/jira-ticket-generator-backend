@@ -40,3 +40,9 @@ pub struct JiraPayload {
     pub issue_updates: Vec<JiraIssueUpdate>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TaskInput {
+    pub subtask: String,
+    pub r#type: String,
+}
+ 

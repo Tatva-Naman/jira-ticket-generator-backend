@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
 use axum::http::HeaderValue;
-use config::AppConfig;
 use reqwest::Method;
 use tower_http::cors::{Any, CorsLayer};
 mod routes;
