@@ -45,4 +45,3 @@ pub struct TaskInput {
     pub subtask: String,
     pub r#type: String,
 }
- 

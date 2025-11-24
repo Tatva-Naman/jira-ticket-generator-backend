@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use crate::{config::AppConfig, handlers::issues_handler::{create_subtasks_handler, search_tasks_handler}};
+
+use crate::{config::AppConfig, handlers::subtasks_handler::{create_subtasks_handler, search_tasks_handler}};
 use axum::{routing::post, Router};
  
 pub fn create_routes(config: Arc<AppConfig>) -> Router {

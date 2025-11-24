@@ -1,11 +1,11 @@
 use crate::config::AppConfig;
-use crate::dtos::issue_payload::TaskInput;
+use crate::dtos::subtasks_payload::TaskInput;
 use crate::error::AppError;
-use crate::services::jira_service::search_jira_tasks;
-use crate::{dtos::issue_payload::IncomingFields, services::jira_service::create_jira_subtasks};
+use crate::services::subtasks_service::search_jira_tasks;
+use crate::{dtos::subtasks_payload::IncomingFields, services::subtasks_service::create_jira_subtasks};
 use axum::{Json, extract::State};
 use std::sync::Arc;
- 
+
 pub async fn create_subtasks_handler(
     State(state): State<Arc<AppConfig>>,
     Json(payload): Json<Vec<IncomingFields>>,
@@ -14,7 +14,7 @@ pub async fn create_subtasks_handler(
         create_jira_subtasks(&state, payload).await;
     response
 }
- 
+
 pub async fn search_tasks_handler(
     State(state): State<Arc<AppConfig>>,
     Json(payload): Json<Vec<TaskInput>>,
