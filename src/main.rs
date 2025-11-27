@@ -13,7 +13,7 @@ mod services;
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let cors = CorsLayer::new()
-        .allow_origin(env::var("LOCALHOST_URL")?.parse::<HeaderValue>().unwrap())
+        .allow_origin(env::var("WEBPAGE_URL")?.parse::<HeaderValue>().unwrap())
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
     let config = config::AppConfig::from_env()?;
