@@ -1,6 +1,6 @@
 use axum::http::HeaderValue;
 use reqwest::Method;
-use std::net::SocketAddr;
+use std::{env, net::SocketAddr};
 use tower_http::cors::{Any, CorsLayer};
 mod config;
 mod dtos;
@@ -13,7 +13,7 @@ mod services;
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let cors = CorsLayer::new()
-        .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
+        .allow_origin(env::var("LOCALHOST_URL")?.parse::<HeaderValue>().unwrap())
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers(Any);
     let config = config::AppConfig::from_env()?;
